@@ -80,288 +80,301 @@
   </div>
 
   <script>
-    // ===== Polyfills =====
-    if (typeof String.prototype.replaceAll !== 'function') {
-      String.prototype.replaceAll = function(find, replace){
-        return this.split(find).join(replace);
-      };
-    }
-
-    // ===== Element refs =====
-    const drop = document.getElementById('drop');
-    const fileInput = document.getElementById('fileInput');
-    const chooseBtn = document.getElementById('chooseBtn');
-    const runBtn = document.getElementById('runBtn');
-    const copyBtn = document.getElementById('copyBtn');
-    const csvBtn = document.getElementById('csvBtn');
-    const tsvBtn = document.getElementById('tsvBtn');
-    const selfTestBtn = document.getElementById('selfTestBtn');
-    const thumbs = document.getElementById('thumbs');
-    const output = document.getElementById('output');
-    const statusEl = document.getElementById('status');
-    const overallBar = document.getElementById('overallBar');
-    const langSel = document.getElementById('lang');
-    const diag = document.getElementById('diag');
-
-    // ===== State =====
-    let files = [];
-    let results = []; // {name, text}
-
-    // Pin Tesseract resource paths to avoid cross-origin failures on GitHub Pages
-    const TESS_OPTS = {
-      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/worker.min.js',
-      corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@4.0.2/tesseract-core.wasm.js',
-      langPath:   'https://tessdata.projectnaptha.com/4.0.0',
+  'use strict';
+  // ===== Polyfills =====
+  if (typeof String.prototype.replaceAll !== 'function') {
+    // eslint-disable-next-line no-extend-native
+    String.prototype.replaceAll = function(find, replace){
+      return this.split(find).join(replace);
     };
+  }
 
-    function setStatus(s){ statusEl.textContent = s; }
-    function pctStr(p){ return Math.max(0, Math.min(100, p)).toFixed(0) + '%'; }
-    function logDiag(lines){
-      diag.textContent = [
-        `Tesseract loaded: ${!!window.Tesseract}`,
-        `workerPath: ${TESS_OPTS.workerPath}`,
-        `corePath:   ${TESS_OPTS.corePath}`,
-        `langPath:   ${TESS_OPTS.langPath}`,
-        `Files: ${files.length}`,
-        ...(Array.isArray(lines)?lines:[lines]).filter(Boolean)
-      ].join('
+  // ===== Element refs =====
+  const drop = document.getElementById('drop');
+  const fileInput = document.getElementById('fileInput');
+  const chooseBtn = document.getElementById('chooseBtn');
+  const runBtn = document.getElementById('runBtn');
+  const copyBtn = document.getElementById('copyBtn');
+  const csvBtn = document.getElementById('csvBtn');
+  const tsvBtn = document.getElementById('tsvBtn');
+  const selfTestBtn = document.getElementById('selfTestBtn');
+  const thumbs = document.getElementById('thumbs');
+  const output = document.getElementById('output');
+  const statusEl = document.getElementById('status');
+  const overallBar = document.getElementById('overallBar');
+  const langSel = document.getElementById('lang');
+  const diag = document.getElementById('diag');
+
+  // ===== State =====
+  let files = [];
+  let results = []; // {name, text}
+
+  // Pin Tesseract resource paths to avoid cross-origin failures on GitHub Pages
+  const TESS_OPTS = {
+    workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/worker.min.js',
+    corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@4.0.2/tesseract-core.wasm.js',
+    langPath:   'https://tessdata.projectnaptha.com/4.0.0',
+  };
+
+  function setStatus(s){ statusEl.textContent = s; }
+  function pctStr(p){ return Math.max(0, Math.min(100, p)).toFixed(0) + '%'; }
+  function logDiag(lines){
+    const arr = [
+      'Tesseract loaded: ' + (!!window.Tesseract),
+      'workerPath: ' + TESS_OPTS.workerPath,
+      'corePath:   ' + TESS_OPTS.corePath,
+      'langPath:   ' + TESS_OPTS.langPath,
+      'Files: ' + files.length
+    ];
+    if (lines){ Array.isArray(lines) ? arr.push(...lines) : arr.push(String(lines)); }
+    diag.textContent = arr.join('
 ');
-    }
+  }
 
-    // ===== Thumbnails =====
-    function renderThumbs(){
-      thumbs.innerHTML = '';
-      files.forEach(f => {
-        const url = URL.createObjectURL(f);
-        const div = document.createElement('div');
-        div.className = 'thumb';
-        div.innerHTML = `<img src="${url}" alt="${f.name}"><div class="meta"><span>${f.name}</span><span>${(f.size/1024).toFixed(1)} KB</span></div>`;
-        thumbs.appendChild(div);
-        setTimeout(()=> URL.revokeObjectURL(url), 15000);
-      });
-    }
-
-    function handleFiles(list){
-      const arr = Array.from(list);
-      const images = arr.filter(f => f.type.startsWith('image/'));
-      const heic = arr.filter(f => /heic|heif/i.test(f.type) || /\.heic$/i.test(f.name));
-      if (heic.length) alert('HEIC/HEIF may not be supported by your browser. Please convert to PNG/JPG.');
-      files = images;
-      results = [];
-      renderThumbs();
-      setStatus(files.length ? `${files.length} image(s) selected.` : 'No files yet.');
-      overallBar.style.width = '0%';
-      output.value = '';
-      logDiag();
-    }
-
-    chooseBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      // Some browsers require the input to be in the DOM and visible; we temporarily un-hide, click, then hide again.
-      fileInput.removeAttribute('hidden');
-      fileInput.style.position = 'fixed';
-      fileInput.style.left = '-9999px';
-      fileInput.click();
-      fileInput.setAttribute('hidden','');
+  // ===== File picking (fix for browsers blocking .click on hidden inputs) =====
+  chooseBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Create a transient input that is not hidden
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = 'image/*';
+    picker.multiple = true;
+    picker.style.position = 'fixed';
+    picker.style.left = '-9999px';
+    document.body.appendChild(picker);
+    picker.addEventListener('change', () => {
+      handleFiles(picker.files);
+      picker.remove();
     });
-    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+    picker.click();
+  });
 
-    ;['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
-    ;['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
-    drop.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+  // Also wire the built-in input (works in most browsers)
+  fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
 
-    function JSONEscape(s){
-      return '"' + String(s).replace(/\/g,'\\').replace(/\"/g,'\\"').replace(/"/g,'\"') + '"';
-    }
+  // Drag & drop
+  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+  drop.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
 
-    function download(type, filename){
-      if(!results.length){ setStatus('No results to download.'); return; }
-      const header = 'filename,extracted_text
+  // ===== Thumbnails =====
+  function renderThumbs(){
+    thumbs.innerHTML = '';
+    files.forEach(f => {
+      const url = URL.createObjectURL(f);
+      const div = document.createElement('div');
+      div.className = 'thumb';
+      div.innerHTML = '<img alt="'+f.name+'" src="'+url+'"><div class="meta"><span>'+f.name+'</span><span>'+ (f.size/1024).toFixed(1) +' KB</span></div>';
+      thumbs.appendChild(div);
+      setTimeout(()=> URL.revokeObjectURL(url), 15000);
+    });
+  }
+
+  function handleFiles(list){
+    const arr = Array.from(list || []);
+    const images = arr.filter(f => f && f.type && f.type.startsWith('image/'));
+    const heic = arr.filter(f => f && (/(heic|heif)/i.test(f.type) || /\.heic$/i.test(f.name)));
+    if (heic.length) alert('HEIC/HEIF may not be supported by your browser. Please convert to PNG/JPG.');
+    files = images;
+    results = [];
+    renderThumbs();
+    setStatus(files.length ? files.length + ' image(s) selected.' : 'No files yet.');
+    overallBar.style.width = '0%';
+    output.value = '';
+    logDiag();
+  }
+
+  function csvQuote(s){
+    const v = String(s ?? '');
+    return '"' + v.replace(/"/g,'""') + '"';
+  }
+
+  function download(type, filename){
+    if(!results.length){ setStatus('No results to download.'); return; }
+    const header = 'filename,extracted_text
 ';
-      const bodyCSV = results.map(r => `${JSONEscape(r.name)},${JSONEscape(r.text).replace(/
-/g,' ')}`).join('
+    const bodyCSV = results.map(r => csvQuote(r.name)+','+csvQuote(r.text.replace(/
+/g,' '))).join('
 ');
-      const bodyTSV = results.map(r => `${r.name}	${r.text.replace(/
-/g,' ')}`).join('
+    const bodyTSV = results.map(r => r.name+'	'+r.text.replace(/
+/g,' ')).join('
 ');
-      const body = (type === 'text/tab-separated-values') ? bodyTSV : (header + bodyCSV);
-      const blob = new Blob([body], { type });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
-      setTimeout(()=> URL.revokeObjectURL(url), 4000);
-    }
+    const body = (type === 'text/tab-separated-values') ? bodyTSV : (header + bodyCSV);
+    const blob = new Blob([body], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+    setTimeout(()=> URL.revokeObjectURL(url), 4000);
+  }
 
-    async function imageToPngBlob(file){
+  async function imageToPngBlob(file){
+    try{
+      const bmp = await createImageBitmap(file);
+      const c = document.createElement('canvas');
+      c.width = bmp.width; c.height = bmp.height;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(bmp,0,0);
+      const blob = await new Promise(res => c.toBlob(res, 'image/png'));
+      bmp.close();
+      return blob || file;
+    }catch{ return file; }
+  }
+
+  async function recognizeOne(file, langs){
+    const png = await imageToPngBlob(file);
+
+    // Scale small images up to help OCR
+    const scaled = await (async () => {
       try{
-        const bmp = await createImageBitmap(file);
-        const c = document.createElement('canvas');
-        c.width = bmp.width; c.height = bmp.height;
-        const ctx = c.getContext('2d');
-        ctx.drawImage(bmp,0,0);
-        const blob = await new Promise(res => c.toBlob(res, 'image/png'));
-        bmp.close();
-        return blob || file;
-      }catch{ return file; }
-    }
-
-    async function recognizeOne(file, langs){
-      const png = await imageToPngBlob(file);
-
-      // Scale small images up to help OCR
-      const scaled = await (async () => {
-        try{
-          const bmp = await createImageBitmap(png);
-          let { width:w, height:h } = bmp;
-          const MIN = 900;
-          if (Math.max(w,h) < MIN){
-            const s = MIN/Math.max(w,h);
-            const c = document.createElement('canvas'); c.width = Math.round(w*s); c.height = Math.round(h*s);
-            const ctx = c.getContext('2d');
-            ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(bmp, 0, 0, c.width, c.height);
-            const b2 = await new Promise(res => c.toBlob(res, 'image/png'));
-            bmp.close();
-            return b2 || png;
-          }
+        const bmp = await createImageBitmap(png);
+        let w = bmp.width, h = bmp.height;
+        const MIN = 900;
+        if (Math.max(w,h) < MIN){
+          const s = MIN/Math.max(w,h);
+          const c = document.createElement('canvas'); c.width = Math.round(w*s); c.height = Math.round(h*s);
+          const ctx = c.getContext('2d');
+          ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(bmp, 0, 0, c.width, c.height);
+          const b2 = await new Promise(res => c.toBlob(res, 'image/png'));
           bmp.close();
-          return png;
-        }catch{ return png; }
-      })();
+          return b2 || png;
+        }
+        bmp.close();
+        return png;
+      }catch{ return png; }
+    })();
 
-      try{
-        const res = await Tesseract.recognize(scaled, (langs||'eng').toLowerCase(), {
-          ...TESS_OPTS,
-          logger: m => {
-            if(m.status === 'recognizing text' && typeof m.progress === 'number'){
-              overallBar.style.width = pctStr(m.progress*100);
-              setStatus(`OCR ${pctStr(m.progress*100)}`);
-            }
-          },
-          params: {
-            tessedit_pageseg_mode: '6',
-            preserve_interword_spaces: '1',
-            user_defined_dpi: '300'
+    try{
+      const res = await Tesseract.recognize(scaled, (langs||'eng').toLowerCase(), {
+        ...TESS_OPTS,
+        logger: m => {
+          if(m.status === 'recognizing text' && typeof m.progress === 'number'){
+            overallBar.style.width = pctStr(m.progress*100);
+            setStatus('OCR ' + pctStr(m.progress*100));
           }
-        });
-        const conf = (res?.data?.confidence ?? res?.data?.conf ?? 0) * 1;
-        const text = (res?.data?.text || '').trim();
-        logDiag([`Langs: ${(langs||'eng')}`, `Confidence≈ ${Math.round(conf)}`, `Chars: ${text.length}`]);
-        return { text, conf };
-      }catch(err){
-        logDiag([`Error recognize(${langs||'eng'}): ${String(err && err.message || err)}`]);
-        return { text:'', conf:0 };
-      }
-    }
-
-    async function runOCR(){
-      if(!files.length){ alert('Please select or drop images first.'); return; }
-      if(!window.Tesseract){ setStatus('Tesseract failed to load'); return; }
-
-      results = [];
-      output.value = '';
-      const langs = langSel.value; // allow combos like eng+tam
-      setStatus(`Running OCR (${langs})…`);
-
-      for (let i=0; i<files.length; i++){
-        overallBar.style.width = pctStr((i/files.length)*100);
-        const best = await recognizeOne(files[i], langs);
-        results.push({ name: files[i].name, text: best.text });
-      }
-      overallBar.style.width = '100%';
-
-      // Emit output (filename, text) per line for easy paste to Excel/Sheets
-      output.value = results.map(r => `${r.name}, ${r.text.replace(/
-/g,' ')}`).join('
-');
-      setStatus('Done.');
-    }
-
-    function copyAll(){
-      if(!output.value){ setStatus('Nothing to copy.'); return; }
-      navigator.clipboard.writeText(output.value).then(()=> setStatus('Copied!')).catch(()=>{
-        output.select(); document.execCommand('copy'); setStatus('Copied (fallback).');
+        },
+        params: {
+          tessedit_pageseg_mode: '6',
+          preserve_interword_spaces: '1',
+          user_defined_dpi: '300'
+        }
       });
+      const conf = (res && res.data && (res.data.confidence ?? res.data.conf) || 0) * 1;
+      const text = (res && res.data && res.data.text || '').trim();
+      logDiag(['Langs: '+(langs||'eng'), 'Confidence≈ '+Math.round(conf), 'Chars: '+text.length]);
+      return { text, conf };
+    }catch(err){
+      logDiag(['Error recognize('+(langs||'eng')+'): ' + (err && err.message || err)]);
+      return { text:'', conf:0 };
     }
+  }
 
-    async function renderTextToBlob(text){
-      const canvas = document.createElement('canvas');
-      const pad = 30;
-      const lines = String(text).split(/
+  async function runOCR(){
+    if(!files.length){ alert('Please select or drop images first.'); return; }
+    if(!window.Tesseract){ setStatus('Tesseract failed to load'); return; }
+
+    results = [];
+    output.value = '';
+    const langs = langSel.value; // allow combos like eng+tam
+    setStatus('Running OCR ('+langs+')…');
+
+    for (let i=0; i<files.length; i++){
+      overallBar.style.width = pctStr((i/files.length)*100);
+      const best = await recognizeOne(files[i], langs);
+      results.push({ name: files[i].name, text: best.text });
+    }
+    overallBar.style.width = '100%';
+
+    // Emit output (filename, text) per line for easy paste to Excel/Sheets
+    output.value = results.map(r => r.name + ', ' + r.text.replace(/
+/g,' ')).join('
+');
+    setStatus('Done.');
+  }
+
+  function copyAll(){
+    if(!output.value){ setStatus('Nothing to copy.'); return; }
+    navigator.clipboard.writeText(output.value).then(()=> setStatus('Copied!')).catch(()=>{
+      output.select(); document.execCommand('copy'); setStatus('Copied (fallback).');
+    });
+  }
+
+  async function renderTextToBlob(text){
+    const canvas = document.createElement('canvas');
+    const pad = 30;
+    const lines = String(text).split(/
 /);
-      const ctx = canvas.getContext('2d');
-      ctx.font = 'bold 42px Arial, Helvetica, sans-serif';
-      const width = Math.max(...lines.map(l=>ctx.measureText(l).width)) + pad*2;
-      const height = lines.length * 60 + pad*2;
-      canvas.width = Math.ceil(width);
-      canvas.height = Math.ceil(height);
-      ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.fillStyle = '#000'; ctx.textBaseline = 'top';
-      ctx.font = 'bold 42px Arial, Helvetica, sans-serif';
-      lines.forEach((l, i)=> ctx.fillText(l, pad, pad + i*60));
-      return new Promise(res => canvas.toBlob(res, 'image/png'));
-    }
+    const ctx = canvas.getContext('2d');
+    ctx.font = 'bold 42px Arial, Helvetica, sans-serif';
+    const width = Math.max(...lines.map(l=>ctx.measureText(l).width)) + pad*2;
+    const height = lines.length * 60 + pad*2;
+    canvas.width = Math.ceil(width);
+    canvas.height = Math.ceil(height);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = '#000'; ctx.textBaseline = 'top';
+    ctx.font = 'bold 42px Arial, Helvetica, sans-serif';
+    lines.forEach((l, i)=> ctx.fillText(l, pad, pad + i*60));
+    return new Promise(res => canvas.toBlob(res, 'image/png'));
+  }
 
-    async function runSelfTest(){
-      const tests = [
-        { name:'test_eng_hello.png', text:'HELLO 123
+  async function runSelfTest(){
+    const tests = [
+      { name:'test_eng_hello.png', text:'HELLO 123
 Invoice #456
 TOTAL 789.00' },
-        { name:'test_eng_blocky.png', text:'THIS IS A TEST
+      { name:'test_eng_blocky.png', text:'THIS IS A TEST
 BLOCK TEXT OCR' },
-        { name:'test_tam_sample.png', text:'தமிழ் மாதிரி
+      { name:'test_tam_sample.png', text:'தமிழ் மாதிரி
 சோதனை' }
-      ];
+    ];
 
-      files = [];
-      thumbs.innerHTML = '';
-      results = [];
-      output.value = '';
-      setStatus('Generating test images…');
+    files = [];
+    thumbs.innerHTML = '';
+    results = [];
+    output.value = '';
+    setStatus('Generating test images…');
 
-      for (const t of tests){
-        const blob = await renderTextToBlob(t.text);
-        const file = new File([blob], t.name, { type: 'image/png' });
-        files.push(file);
-      }
-      renderThumbs();
-      setStatus('Running self‑test…');
+    for (const t of tests){
+      const blob = await renderTextToBlob(t.text);
+      const file = new File([blob], t.name, { type: 'image/png' });
+      files.push(file);
+    }
+    renderThumbs();
+    setStatus('Running self‑test…');
 
-      for (let i=0; i<i<files.length; i++){} // placeholder to ensure parse
-      for (let i=0; i<files.length; i++){
-        const L = /tam/.test(files[i].name) ? 'tam' : 'eng';
-        const best = await recognizeOne(files[i], L);
-        results.push({ name: files[i].name, text: best.text });
-      }
-      output.value = results.map(r => `${r.name}, ${r.text.replace(/
-/g,' ')}`).join('
+    for (let i=0; i<files.length; i++){
+      const L = /tam/.test(files[i].name) ? 'tam' : 'eng';
+      const best = await recognizeOne(files[i], L);
+      results.push({ name: files[i].name, text: best.text });
+    }
+    output.value = results.map(r => r.name + ', ' + r.text.replace(/
+/g,' ')).join('
 ');
 
-      logDiag([
-        '', 'Self‑test expected vs. got (first 60 chars):',
-        ...results.map((r,i)=>{
-          const exp = tests[i].text.replace(/
+    logDiag(['', 'Self‑test expected vs. got (first 60 chars):',
+      ...results.map((r,i)=>{
+        const exp = tests[i].text.replace(/
 /g,' ').slice(0,60);
-          const got = r.text.replace(/
+        const got = r.text.replace(/
 /g,' ').slice(0,60);
-          return `• ${tests[i].name}
-   expected≈ ${exp}
-   got     ≈ ${got}`;
-        })
-      ]);
-      setStatus('Self‑test complete.');
-      overallBar.style.width = '100%';
-    }
+        return '• '+tests[i].name+'
+   expected≈ '+exp+'
+   got     ≈ '+got;
+      })
+    ]);
+    setStatus('Self‑test complete.');
+    overallBar.style.width = '100%';
+  }
 
-    // ===== Wire up buttons =====
-    runBtn.addEventListener('click', runOCR);
-    copyBtn.addEventListener('click', copyAll);
-    csvBtn.addEventListener('click', () => download('text/csv', 'ocr_results.csv'));
-    tsvBtn.addEventListener('click', () => download('text/tab-separated-values', 'ocr_results.tsv'));
-    selfTestBtn.addEventListener('click', runSelfTest);
+  // ===== Wire up buttons =====
+  runBtn.addEventListener('click', runOCR);
+  copyBtn.addEventListener('click', copyAll);
+  csvBtn.addEventListener('click', () => download('text/csv', 'ocr_results.csv'));
+  tsvBtn.addEventListener('click', () => download('text/tab-separated-values', 'ocr_results.tsv'));
+  selfTestBtn.addEventListener('click', runSelfTest);
 
-    // Initial diag
-    logDiag();
+  // Initial diag
+  logDiag();
   </script>
 </body>
 </html>
