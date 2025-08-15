@@ -13,7 +13,7 @@
     .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
     .dropzone { border: 2px dashed #374151; border-radius: 14px; padding: 22px; text-align:center; margin-bottom: 16px; background:#0b1220; }
     .dropzone.drag { border-color: #3b82f6; background: #0d1530; }
-    .btn { padding: 10px 14px; border-radius: 10px; border: 1px solid #374151; background:#1f2937; color:#fff; cursor: pointer; }
+    .btn { padding: 10px 14px; border-radius: 10px; border: 1px solid #374151; background:#1f2937; color:#fff; cursor: pointer; display:inline-block; }
     .btn.primary { background:#3b82f6; border-color: transparent; }
     .btn.success { background:#22c55e; border-color: transparent; }
     select, textarea, input[type="text"] { background:#111827; color:#e5e7eb; border:1px solid #374151; border-radius:10px; padding:10px 12px; font:inherit; }
@@ -28,6 +28,8 @@
     .progress > div { height:100%; width:0%; background: linear-gradient(90deg, #3b82f6, #22d3ee); transition: width .2s; }
     .mono { font:12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre-wrap; }
     details summary { cursor:pointer; }
+    /* Make the input accessible but non-visible so label clicks work reliably */
+    .visually-hidden-input { position: fixed; left: -9999px; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js" crossorigin="anonymous"></script>
 </head>
@@ -35,8 +37,8 @@
   <div class="wrap">
     <h1>Image → Text (OCR)</h1>
     <div class="dropzone" id="drop">
-      <input type="file" id="fileInput" accept="image/*" multiple hidden>
-      <p>📸 <strong>Drag & drop</strong> images here or <button type="button" class="btn primary" id="chooseBtn">Choose Images</button></p>
+      <input type="file" id="fileInput" accept="image/*" multiple class="visually-hidden-input">
+      <p>📸 <strong>Drag & drop</strong> images here or <label for="fileInput" class="btn primary" id="chooseLabel">Choose Images</label></p>
       <div class="progress" aria-label="overall"><div id="overallBar"></div></div>
       <p id="status" class="mono" style="color:#9ca3af; margin:8px 0 0">No files yet.</p>
     </div>
@@ -83,7 +85,6 @@
   'use strict';
   // ===== Polyfills =====
   if (typeof String.prototype.replaceAll !== 'function') {
-    // eslint-disable-next-line no-extend-native
     String.prototype.replaceAll = function(find, replace){
       return this.split(find).join(replace);
     };
@@ -92,7 +93,6 @@
   // ===== Element refs =====
   const drop = document.getElementById('drop');
   const fileInput = document.getElementById('fileInput');
-  const chooseBtn = document.getElementById('chooseBtn');
   const runBtn = document.getElementById('runBtn');
   const copyBtn = document.getElementById('copyBtn');
   const csvBtn = document.getElementById('csvBtn');
@@ -131,26 +131,8 @@
 ');
   }
 
-  // ===== File picking (fix for browsers blocking .click on hidden inputs) =====
-  chooseBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // Create a transient input that is not hidden
-    const picker = document.createElement('input');
-    picker.type = 'file';
-    picker.accept = 'image/*';
-    picker.multiple = true;
-    picker.style.position = 'fixed';
-    picker.style.left = '-9999px';
-    document.body.appendChild(picker);
-    picker.addEventListener('change', () => {
-      handleFiles(picker.files);
-      picker.remove();
-    });
-    picker.click();
-  });
-
-  // Also wire the built-in input (works in most browsers)
+  // ===== File picking =====
+  // Label click → native file picker (no JS .click() hacks)
   fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
 
   // Drag & drop
