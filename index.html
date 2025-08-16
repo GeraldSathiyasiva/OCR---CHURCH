@@ -1,61 +1,380 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Image to Text OCR</title>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Image → Text (OCR) | Paste to Excel</title>
+  <meta name="description" content="Drop or select images, see thumbnails, run on-device OCR (Tesseract.js), and copy/download results for Excel/Sheets."/>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    #preview img { max-height: 150px; margin: 5px; border: 1px solid #ccc; }
-    textarea { width: 100%; height: 200px; }
+    :root { color-scheme: light dark; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background: #0f1115; color: #e5e7eb; margin: 0; }
+    .wrap { max-width: 1060px; margin: auto; padding: 16px; }
+    h1 { margin: 12px 0 8px; }
+    .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+    .dropzone { border: 2px dashed #374151; border-radius: 14px; padding: 22px; text-align:center; margin-bottom: 16px; background:#0b1220; }
+    .dropzone.drag { border-color: #3b82f6; background: #0d1530; }
+    .btn { padding: 10px 14px; border-radius: 10px; border: 1px solid #374151; background:#1f2937; color:#fff; cursor: pointer; display:inline-block; }
+    .btn.primary { background:#3b82f6; border-color: transparent; }
+    .btn.success { background:#22c55e; border-color: transparent; }
+    select, textarea, input[type="text"] { background:#111827; color:#e5e7eb; border:1px solid #374151; border-radius:10px; padding:10px 12px; font:inherit; }
+    textarea { width:100%; min-height:240px; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+    @media (max-width:900px){ .grid { grid-template-columns: 1fr; } }
+    .thumbs { display:grid; grid-template-columns: repeat(auto-fill, minmax(160px,1fr)); gap:10px; }
+    .thumb { background:#0b1220; border:1px solid #1f2937; border-radius:12px; overflow:hidden; }
+    .thumb img { display:block; width:100%; height:140px; object-fit:cover; background:#000; }
+    .thumb .meta { display:flex; justify-content:space-between; padding:6px 8px; font-size:12px; color:#9ca3af; }
+    .progress { height:10px; border-radius:999px; overflow:hidden; background:#111827; border:1px solid #1f2937; }
+    .progress > div { height:100%; width:0%; background: linear-gradient(90deg, #3b82f6, #22d3ee); transition: width .2s; }
+    .mono { font:12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre-wrap; }
+    details summary { cursor:pointer; }
+    .visually-hidden-input { position: fixed; left: -9999px; top: 0; width: 1px; height: 1px; opacity: 0; }
+    label.inline { display:flex; align-items:center; gap:8px; }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
-  <h1>Image to Text OCR</h1>
+  <div class="wrap">
+    <h1>Image → Text (OCR)</h1>
+    <div class="dropzone" id="drop">
+      <input type="file" id="fileInput" accept="image/*" multiple class="visually-hidden-input">
+      <p>📸 <strong>Drag & drop</strong> images here or <label for="fileInput" class="btn primary" id="chooseLabel">Choose Images</label></p>
+      <div class="progress" aria-label="overall"><div id="overallBar"></div></div>
+      <p id="status" class="mono" style="color:#9ca3af; margin:8px 0 0">No files yet.</p>
+    </div>
 
-  <input type="file" id="fileInput" accept="image/*" multiple>
-  <button id="runOcrBtn">Run OCR</button>
+    <div class="row" style="margin-bottom:12px">
+      <label for="lang">Language:</label>
+      <select id="lang">
+        <option value="eng" selected>English (eng)</option>
+        <option value="tam">Tamil (tam)</option>
+        <option value="eng+tam">English + Tamil</option>
+        <option value="msa">Malay (msa)</option>
+        <option value="hin">Hindi (hin)</option>
+      </select>
+      <label class="inline"><input type="checkbox" id="handwriting"> Handwriting mode (experimental)</label>
+      <button type="button" class="btn primary" id="runBtn">Run OCR</button>
+      <button type="button" class="btn" id="copyBtn">Copy All</button>
+      <button type="button" class="btn" id="csvBtn">Download CSV</button>
+      <button type="button" class="btn" id="tsvBtn">Download TSV</button>
+      <button type="button" class="btn success" id="selfTestBtn">Run Self‑Test</button>
+    </div>
 
-  <h2>Preview</h2>
-  <div id="preview"></div>
+    <div class="grid">
+      <div>
+        <h3>Images</h3>
+        <div class="thumbs" id="thumbs"></div>
+      </div>
+      <div>
+        <h3>Text Output</h3>
+        <textarea id="output" class="mono" placeholder="OCR output will appear here…"></textarea>
+      </div>
+    </div>
 
-  <h2>Extracted Text</h2>
-  <textarea id="output" placeholder="OCR results will appear here..."></textarea>
+    <details style="margin-top:16px">
+      <summary>Diagnostics & Tips</summary>
+      <div id="diag" class="mono"></div>
+      <ul>
+        <li>Everything runs in your browser via <code>Tesseract.js</code>. Images are not uploaded.</li>
+        <li>For handwriting, try: good lighting, no shadows, higher contrast, rotate to upright.</li>
+      </ul>
+    </details>
+  </div>
 
   <script>
-    const fileInput = document.getElementById('fileInput');
-    const preview = document.getElementById('preview');
-    const runOcrBtn = document.getElementById('runOcrBtn');
-    const output = document.getElementById('output');
+  'use strict';
+  if (typeof String.prototype.replaceAll !== 'function') {
+    String.prototype.replaceAll = function(find, replace){ return this.split(find).join(replace); };
+  }
 
-    let selectedFiles = [];
+  const drop = document.getElementById('drop');
+  const fileInput = document.getElementById('fileInput');
+  const runBtn = document.getElementById('runBtn');
+  const copyBtn = document.getElementById('copyBtn');
+  const csvBtn = document.getElementById('csvBtn');
+  const tsvBtn = document.getElementById('tsvBtn');
+  const selfTestBtn = document.getElementById('selfTestBtn');
+  const thumbs = document.getElementById('thumbs');
+  const output = document.getElementById('output');
+  const statusEl = document.getElementById('status');
+  const overallBar = document.getElementById('overallBar');
+  const langSel = document.getElementById('lang');
+  const handwritingChk = document.getElementById('handwriting');
+  const diag = document.getElementById('diag');
 
-    fileInput.addEventListener('change', (e) => {
-      preview.innerHTML = '';
-      selectedFiles = Array.from(e.target.files);
+  let files = [];
+  let results = [];
 
-      selectedFiles.forEach(file => {
-        const img = document.createElement('img');
-        img.src = URL.createObjectURL(file);
-        preview.appendChild(img);
-      });
+  const TESS_OPTS = {
+    workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/worker.min.js',
+    corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@4.0.2/tesseract-core.wasm.js',
+    langPath:   'https://tessdata.projectnaptha.com/4.0.0'
+  };
+
+  function setStatus(s){ statusEl.textContent = s; }
+  function pctStr(p){ return Math.max(0, Math.min(100, p)).toFixed(0) + '%'; }
+  function logDiag(lines){
+    const arr = [
+      'Tesseract loaded: ' + (!!window.Tesseract),
+      'workerPath: ' + TESS_OPTS.workerPath,
+      'corePath:   ' + TESS_OPTS.corePath,
+      'langPath:   ' + TESS_OPTS.langPath,
+      'Files: ' + files.length
+    ];
+    if (lines){ Array.isArray(lines) ? arr.push(...lines) : arr.push(String(lines)); }
+    diag.textContent = arr.join('
+');
+  }
+
+  fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+  drop.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+
+  function renderThumbs(){
+    thumbs.innerHTML = '';
+    files.forEach(f => {
+      const url = URL.createObjectURL(f);
+      const div = document.createElement('div');
+      div.className = 'thumb';
+      div.innerHTML = '<img alt="'+f.name+'" src="'+url+'"><div class="meta"><span>'+f.name+'</span><span>'+ (f.size/1024).toFixed(1) +' KB</span></div>';
+      thumbs.appendChild(div);
+      setTimeout(()=> URL.revokeObjectURL(url), 15000);
     });
+  }
 
-    runOcrBtn.addEventListener('click', async () => {
-      if (!selectedFiles.length) {
-        alert('Please choose images first.');
-        return;
+  function handleFiles(list){
+    const arr = Array.from(list || []);
+    const images = arr.filter(f => f && f.type && f.type.startsWith('image/'));
+    const heic = arr.filter(f => f && (/(heic|heif)/i.test(f.type) || /\.heic$/i.test(f.name)));
+    if (heic.length) alert('HEIC/HEIF may not be supported by your browser. Please convert to PNG/JPG.');
+    files = images;
+    results = [];
+    renderThumbs();
+    setStatus(files.length ? files.length + ' image(s) selected.' : 'No files yet.');
+    overallBar.style.width = '0%';
+    output.value = '';
+    logDiag();
+  }
+
+  function csvQuote(s){ return '"' + String(s ?? '').replace(/"/g,'""') + '"'; }
+  function download(type, filename){
+    if(!results.length){ setStatus('No results to download.'); return; }
+    const header = 'filename,extracted_text
+';
+    const bodyCSV = results.map(r => csvQuote(r.name)+','+csvQuote(r.text.replace(/
+/g,' '))).join('
+');
+    const bodyTSV = results.map(r => r.name+'	'+r.text.replace(/
+/g,' ')).join('
+');
+    const body = (type === 'text/tab-separated-values') ? bodyTSV : (header + bodyCSV);
+    const blob = new Blob([body], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+    setTimeout(()=> URL.revokeObjectURL(url), 4000);
+  }
+
+  // --- Simple canvas pre-processing helpers (better for handwriting) ---
+  function drawToCanvas(file){
+    return new Promise((resolve,reject)=>{
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = img.width; c.height = img.height;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img,0,0);
+        resolve({canvas:c, ctx});
+      };
+      img.onerror = reject;
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  function toGrayscale(ctx, w, h){
+    const d = ctx.getImageData(0,0,w,h);
+    const a = d.data;
+    for(let i=0;i<a.length;i+=4){
+      const r=a[i], g=a[i+1], b=a[i+2];
+      const y = 0.299*r + 0.587*g + 0.114*b; // luma
+      a[i]=a[i+1]=a[i+2]=y;
+    }
+    ctx.putImageData(d,0,0);
+  }
+
+  function contrast(ctx, w, h, cAmt){
+    const d = ctx.getImageData(0,0,w,h);
+    const a = d.data; const f = (259*(cAmt+255))/(255*(259-cAmt));
+    for(let i=0;i<a.length;i+=4){
+      a[i]   = Math.max(0, Math.min(255, f*(a[i]-128)+128));
+      a[i+1] = Math.max(0, Math.min(255, f*(a[i+1]-128)+128));
+      a[i+2] = Math.max(0, Math.min(255, f*(a[i+2]-128)+128));
+    }
+    ctx.putImageData(d,0,0);
+  }
+
+  function adaptiveThreshold(ctx, w, h, block){
+    // very lightweight local mean threshold
+    const s = ctx.getImageData(0,0,w,h); const a=s.data;
+    const out = ctx.createImageData(w,h); const o=out.data;
+    const rad = Math.max(1, Math.floor(block/2));
+    for(let y=0;y<h;y++){
+      for(let x=0;x<w;x++){
+        let sum=0, cnt=0;
+        for(let dy=-rad; dy<=rad; dy++){
+          let yy=y+dy; if(yy<0||yy>=h) continue;
+          for(let dx=-rad; dx<=rad; dx++){
+            let xx=x+dx; if(xx<0||xx>=w) continue;
+            const ii=(yy*w+xx)*4; sum+=a[ii]; cnt++;
+          }
+        }
+        const mean = sum/cnt - 8; // bias a bit darker
+        const ii=(y*w+x)*4; const v=a[ii] < mean ? 0 : 255;
+        o[ii]=o[ii+1]=o[ii+2]=v; o[ii+3]=255;
       }
+    }
+    ctx.putImageData(out,0,0);
+  }
 
-      output.value = 'Processing...\n';
-      for (const file of selectedFiles) {
-        output.value += `\n--- ${file.name} ---\n`;
-        const result = await Tesseract.recognize(file, 'eng', {
-          logger: m => console.log(m)
+  async function preprocessForHandwriting(file){
+    // Upscale small images, grayscale, increase contrast, adaptive threshold
+    const {canvas:c, ctx} = await drawToCanvas(file);
+    const MAX = 2000;
+    if (Math.max(c.width,c.height) < MAX){
+      const s = MAX/Math.max(c.width,c.height);
+      const c2 = document.createElement('canvas'); c2.width=Math.round(c.width*s); c2.height=Math.round(c.height*s);
+      const x2 = c2.getContext('2d');
+      x2.imageSmoothingEnabled = true; x2.imageSmoothingQuality='high';
+      x2.drawImage(c,0,0,c2.width,c2.height);
+      return preprocessCanvas(c2, true);
+    }
+    return preprocessCanvas(c, true);
+  }
+
+  function preprocessCanvas(c, strong){
+    const ctx = c.getContext('2d');
+    toGrayscale(ctx, c.width, c.height);
+    contrast(ctx, c.width, c.height, strong ? 140 : 80);
+    adaptiveThreshold(ctx, c.width, c.height, strong ? 21 : 15);
+    return new Promise(res => c.toBlob(b=>res(b||c), 'image/png'));
+  }
+
+  async function imageToPngBlob(file){
+    try{
+      const bmp = await createImageBitmap(file);
+      const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+      const ctx = c.getContext('2d'); ctx.drawImage(bmp,0,0); const blob = await new Promise(res => c.toBlob(res, 'image/png'));
+      bmp.close(); return blob || file;
+    }catch{ return file; }
+  }
+
+  async function recognizeOne(file, langs){
+    const handwriting = handwritingChk.checked;
+    const prepped = handwriting ? await preprocessForHandwriting(file) : await imageToPngBlob(file);
+
+    // Try a couple of Page Segment Modes; pick the one with more confident/longer text
+    const psmList = handwriting ? ['7','13','6'] : ['6'];
+    let best={text:'', conf:0};
+
+    for (const psm of psmList){
+      try{
+        const res = await Tesseract.recognize(prepped, (langs||'eng').toLowerCase(), {
+          ...TESS_OPTS,
+          logger: m => {
+            if(m.status === 'recognizing text' && typeof m.progress === 'number'){
+              overallBar.style.width = pctStr(m.progress*100);
+              setStatus('OCR ' + pctStr(m.progress*100));
+            }
+          },
+          params: {
+            tessedit_pageseg_mode: psm,
+            preserve_interword_spaces: '1',
+            user_defined_dpi: '350'
+          }
         });
-        output.value += result.data.text.trim() + '\n';
+        const conf = (res && res.data && (res.data.confidence ?? res.data.conf) || 0) * 1;
+        const text = (res && res.data && res.data.text || '').trim();
+        const score = (conf||0) + Math.min(50, text.length/4);
+        if (score > ((best.conf||0) + Math.min(50, best.text.length/4))) best={text, conf};
+      }catch(err){
+        logDiag('recognize error psm='+psm+': '+(err && err.message || err));
       }
-    });
+    }
+    return best;
+  }
+
+  async function runOCR(){
+    if(!files.length){ alert('Please select or drop images first.'); return; }
+    if(!window.Tesseract){ setStatus('Tesseract failed to load'); return; }
+    results = []; output.value = '';
+    const langs = langSel.value;
+    setStatus('Running OCR ('+langs+(handwritingChk.checked?' + handwriting':'')+')…');
+
+    for (let i=0; i<files.length; i++){
+      overallBar.style.width = pctStr((i/files.length)*100);
+      const best = await recognizeOne(files[i], langs);
+      results.push({ name: files[i].name, text: best.text });
+    }
+    overallBar.style.width = '100%';
+    output.value = results.map(r => r.name + ', ' + r.text.replace(/
+/g,' ')).join('
+');
+    setStatus('Done.');
+  }
+
+  function copyAll(){
+    if(!output.value){ setStatus('Nothing to copy.'); return; }
+    navigator.clipboard.writeText(output.value).then(()=> setStatus('Copied!')).catch(()=>{ output.select(); document.execCommand('copy'); setStatus('Copied (fallback).'); });
+  }
+
+  async function renderTextToBlob(text){
+    const c = document.createElement('canvas'); const pad = 30; const lines = String(text).split(/
+/);
+    const ctx = c.getContext('2d'); ctx.font = '600 42px Arial, Helvetica, sans-serif';
+    const width = Math.max(...lines.map(l=>ctx.measureText(l).width), 10) + pad*2; const height = lines.length * 60 + pad*2;
+    c.width = Math.ceil(width); c.height = Math.ceil(height);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,c.width,c.height); ctx.fillStyle = '#000'; ctx.textBaseline = 'top'; ctx.font = '600 42px Arial, Helvetica, sans-serif';
+    lines.forEach((l, i)=> ctx.fillText(l, pad, pad + i*60));
+    return new Promise(res => c.toBlob(res, 'image/png'));
+  }
+
+  async function runSelfTest(){
+    const tests = [
+      { name:'test_printed.png', text:'HELLO 123
+TOTAL 789.00' },
+      { name:'test_handwriting_like.png', text:'hand written note
+call mom at 5' }
+    ];
+
+    files = []; thumbs.innerHTML = ''; results = []; output.value = '';
+    setStatus('Generating test images…');
+
+    for (const t of tests){
+      const blob = await renderTextToBlob(t.text);
+      const file = new File([blob], t.name, { type: 'image/png' });
+      files.push(file);
+    }
+    renderThumbs(); setStatus('Running self‑test…');
+
+    for (let i=0; i<files.length; i++){
+      const isHW = /handwriting/i.test(files[i].name);
+      handwritingChk.checked = isHW; // toggle to exercise both paths
+      const best = await recognizeOne(files[i], 'eng');
+      results.push({ name: files[i].name, text: best.text });
+    }
+    output.value = results.map(r => r.name + ', ' + r.text.replace(/
+/g,' ')).join('
+');
+    setStatus('Self‑test complete.'); overallBar.style.width = '100%';
+  }
+
+  runBtn.addEventListener('click', runOCR);
+  copyBtn.addEventListener('click', copyAll);
+  csvBtn.addEventListener('click', () => download('text/csv', 'ocr_results.csv'));
+  tsvBtn.addEventListener('click', () => download('text/tab-separated-values', 'ocr_results.tsv'));
+  selfTestBtn.addEventListener('click', runSelfTest);
+
+  logDiag();
   </script>
 </body>
 </html>
